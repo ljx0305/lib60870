@@ -53,6 +53,7 @@ static struct sCS101_AppLayerParameters defaultAppLayerParameters = {
     /* .originatorAddress = */ 0,
     /* .sizeOfCA = */ 2,
     /* .sizeOfIOA = */ 3,
+    /* .maxSizeOfASDU = */ 249
 };
 
 #ifndef HOST_NAME_MAX
@@ -87,9 +88,10 @@ struct sCS104_Connection {
     int receiveCount;
     int sendCount;
 
-    bool firstIMessageReceived;
-
     int unconfirmedReceivedIMessages;
+
+    /* timeout T2 handling */
+    bool timeoutT2Trigger;
     uint64_t lastConfirmationTime;
 
     uint64_t nextT3Timeout;
@@ -172,6 +174,9 @@ sendIMessage(CS104_Connection self, Frame frame)
 
     self->sendCount = (self->sendCount + 1) % 32768;
 
+    self->unconfirmedReceivedIMessages = false;
+    self->timeoutT2Trigger = false;
+
     return self->sendCount;
 }
 
@@ -238,6 +243,12 @@ CS104_Connection_createSecure(const char* hostname, int tcpPort, TLSConfiguratio
 #endif /* (CONFIG_CS104_SUPPORT_TLS == 1) */
 
 static void
+resetT3Timeout(CS104_Connection self) {
+    self->nextT3Timeout = Hal_getTimeInMs() + (self->parameters.t3 * 1000);
+}
+
+
+static void
 resetConnection(CS104_Connection self)
 {
     self->connectTimeoutInMs = self->parameters.t0 * 1000;
@@ -251,7 +262,7 @@ resetConnection(CS104_Connection self)
 
     self->unconfirmedReceivedIMessages = 0;
     self->lastConfirmationTime = 0xffffffffffffffff;
-    self->firstIMessageReceived = false;
+    self->timeoutT2Trigger = false;
 
     self->oldestSentASDU = -1;
     self->newestSentASDU = -1;
@@ -263,12 +274,10 @@ resetConnection(CS104_Connection self)
 
     self->outstandingTestFCConMessages = 0;
     self->uMessageTimeout = 0;
+
+    resetT3Timeout(self);
 }
 
-static void
-resetT3Timeout(CS104_Connection self) {
-    self->nextT3Timeout = Hal_getTimeInMs() + (self->parameters.t3 * 1000);
-}
 
 static bool
 checkSequenceNumber(CS104_Connection self, int seqNo)
@@ -495,8 +504,8 @@ checkMessage(CS104_Connection self, uint8_t* buffer, int msgSize)
 {
     if ((buffer[2] & 1) == 0) { /* I format frame */
 
-        if (self->firstIMessageReceived == false) {
-            self->firstIMessageReceived = true;
+        if (self->timeoutT2Trigger == false) {
+            self->timeoutT2Trigger = true;
             self->lastConfirmationTime = Hal_getTimeInMs(); /* start timeout T2 */
         }
 
@@ -614,6 +623,7 @@ handleTimeouts(CS104_Connection self)
 
             self->lastConfirmationTime = currentTime;
             self->unconfirmedReceivedIMessages = 0;
+            self->timeoutT2Trigger = false;
 
             sendSMessage(self); /* send confirmation message */
         }
@@ -712,6 +722,7 @@ handleConnection(void* parameter)
                     if (self->unconfirmedReceivedIMessages >= self->parameters.w) {
                         self->lastConfirmationTime = Hal_getTimeInMs();
                         self->unconfirmedReceivedIMessages = 0;
+                        self->timeoutT2Trigger = false;
                         sendSMessage(self);
                     }
                 }
@@ -752,10 +763,6 @@ handleConnection(void* parameter)
 void
 CS104_Connection_connectAsync(CS104_Connection self)
 {
-    resetConnection(self);
-
-    resetT3Timeout(self);
-
     self->connectionHandlingThread = Thread_create(handleConnection, (void*) self, false);
 
     if (self->connectionHandlingThread)
@@ -916,7 +923,7 @@ CS104_Connection_sendReadCommand(CS104_Connection self, int ca, int ioa)
 }
 
 bool
-CS104_Connection_sendClockSyncCommand(CS104_Connection self, int ca, CP56Time2a time)
+CS104_Connection_sendClockSyncCommand(CS104_Connection self, int ca, CP56Time2a newTime)
 {
     Frame frame = (Frame) T104Frame_create();
 
@@ -924,7 +931,7 @@ CS104_Connection_sendClockSyncCommand(CS104_Connection self, int ca, CP56Time2a 
 
     encodeIOA(self, frame, 0);
 
-    T104Frame_appendBytes(frame, CP56Time2a_getEncodedValue(time), 7);
+    T104Frame_appendBytes(frame, CP56Time2a_getEncodedValue(newTime), 7);
 
     return sendASDUInternal(self, frame);
 }
@@ -948,6 +955,23 @@ bool
 CS104_Connection_sendProcessCommand(CS104_Connection self, TypeID typeId, CS101_CauseOfTransmission cot, int ca, InformationObject sc)
 {
     Frame frame = (Frame) T104Frame_create();
+
+    if (typeId == 0)
+        typeId = InformationObject_getType(sc);
+
+    encodeIdentificationField (self, frame, typeId, 1 /* SQ:false; NumIX:1 */, cot, ca);
+
+    InformationObject_encode(sc, frame, (CS101_AppLayerParameters) &(self->alParameters), false);
+
+    return sendASDUInternal(self, frame);
+}
+
+bool
+CS104_Connection_sendProcessCommandEx(CS104_Connection self, CS101_CauseOfTransmission cot, int ca, InformationObject sc)
+{
+    Frame frame = (Frame) T104Frame_create();
+
+    TypeID typeId = InformationObject_getType(sc);
 
     encodeIdentificationField (self, frame, typeId, 1 /* SQ:false; NumIX:1 */, cot, ca);
 

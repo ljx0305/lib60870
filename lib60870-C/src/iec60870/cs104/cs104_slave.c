@@ -68,6 +68,7 @@ static struct sCS101_AppLayerParameters defaultAppLayerParameters = {
     /* .originatorAddress = */ 0,
     /* .sizeOfCA = */ 2,
     /* .sizeOfIOA = */ 3,
+    /* .maxSizeOfASDU = */ 249
 };
 
 typedef struct {
@@ -262,7 +263,7 @@ MessageQueue_isAsduAvailable(MessageQueue self)
 
 
 static FrameBuffer*
-MessageQueue_getNextWaitingASDU(MessageQueue self, uint64_t* timestamp, int* index)
+MessageQueue_getNextWaitingASDU(MessageQueue self, uint64_t* timestamp, int* queueIndex)
 {
     FrameBuffer* buffer = NULL;
 
@@ -285,7 +286,7 @@ MessageQueue_getNextWaitingASDU(MessageQueue self, uint64_t* timestamp, int* ind
 
             self->asdus[currentIndex].state = QUEUE_ENTRY_STATE_SENT_BUT_NOT_CONFIRMED;
             *timestamp = self->asdus[currentIndex].entryTimestamp;
-            *index = currentIndex;
+            *queueIndex = currentIndex;
 
             buffer = &(self->asdus[currentIndex].asdu);
         }
@@ -313,9 +314,9 @@ MessageQueue_releaseAllQueuedASDUs(MessageQueue self)
 #endif /* (CONFIG_CS104_SUPPORT_SERVER_MODE_SINGLE_REDUNDANCY_GROUP == 1) */
 
 static void
-MessageQueue_markAsduAsConfirmed(MessageQueue self, int index, uint64_t timestamp)
+MessageQueue_markAsduAsConfirmed(MessageQueue self, int queueIndex, uint64_t timestamp)
 {
-    if ((index < 0) || (index > self->size))
+    if ((queueIndex < 0) || (queueIndex > self->size))
         return;
 
 #if (CONFIG_USE_THREADS == 1)
@@ -323,10 +324,10 @@ MessageQueue_markAsduAsConfirmed(MessageQueue self, int index, uint64_t timestam
 #endif
 
     if (self->entryCounter > 0) {
-        if (self->asdus[index].state == QUEUE_ENTRY_STATE_SENT_BUT_NOT_CONFIRMED) {
+        if (self->asdus[queueIndex].state == QUEUE_ENTRY_STATE_SENT_BUT_NOT_CONFIRMED) {
 
-            if (self->asdus[index].entryTimestamp == timestamp) {
-                int currentIndex = index;
+            if (self->asdus[queueIndex].entryTimestamp == timestamp) {
+                int currentIndex = queueIndex;
 
                 while (self->asdus[currentIndex].state == QUEUE_ENTRY_STATE_SENT_BUT_NOT_CONFIRMED) {
 
@@ -344,7 +345,7 @@ MessageQueue_markAsduAsConfirmed(MessageQueue self, int index, uint64_t timestam
                     }
 
                     if (currentIndex == self->firstMsgIndex) {
-                        self->firstMsgIndex = (index + 1) % self->size;
+                        self->firstMsgIndex = (queueIndex + 1) % self->size;
 
                         if (self->entryCounter == 1)
                             self->lastMsgIndex = self->firstMsgIndex;
@@ -358,7 +359,7 @@ MessageQueue_markAsduAsConfirmed(MessageQueue self, int index, uint64_t timestam
                         currentIndex = self->size - 1;
 
                     /* break if we reached the first deleted entry again */
-                    if (currentIndex == index)
+                    if (currentIndex == queueIndex)
                         break;
 
                     DEBUG_PRINT("queue state: noASDUs: %i oldest: %i latest: %i\n", self->entryCounter,
@@ -950,7 +951,10 @@ struct sMasterConnection {
     int receiveCount;  /* received messages - sequence counter */
 
     int unconfirmedReceivedIMessages; /* number of unconfirmed messages received */
+
+    /* timeout T2 handling */
     uint64_t lastConfirmationTime; /* timestamp when the last confirmation message (for I messages) was sent */
+    bool timeoutT2Triggered;
 
     uint64_t nextT3Timeout;
     int outstandingTestFRConMessages;
@@ -965,8 +969,6 @@ struct sMasterConnection {
 
     MessageQueue lowPrioQueue;
     HighPriorityASDUQueue highPrioQueue;
-
-    bool firstIMessageReceived;
 };
 
 
@@ -1089,6 +1091,7 @@ sendIMessage(MasterConnection self, uint8_t* buffer, int msgSize)
         DEBUG_PRINT("SEND I (size = %i) N(S) = %i N(R) = %i\n", msgSize, self->sendCount, self->receiveCount);
         self->sendCount = (self->sendCount + 1) % 32768;
         self->unconfirmedReceivedIMessages = 0;
+        self->timeoutT2Triggered = false;
     }
     else
         self->isRunning = false;
@@ -1486,8 +1489,8 @@ handleMessage(MasterConnection self, uint8_t* buffer, int msgSize)
             return false;
         }
 
-        if (self->firstIMessageReceived == false) {
-            self->firstIMessageReceived = true;
+        if (self->timeoutT2Triggered == false) {
+            self->timeoutT2Triggered = true;
             self->lastConfirmationTime = currentTime; /* start timeout T2 */
         }
 
@@ -1632,12 +1635,12 @@ sendNextLowPriorityASDU(MasterConnection self)
     MessageQueue_lock(self->lowPrioQueue);
 
     uint64_t timestamp;
-    int index;
+    int queueIndex;
 
-    asdu = MessageQueue_getNextWaitingASDU(self->lowPrioQueue, &timestamp, &index);
+    asdu = MessageQueue_getNextWaitingASDU(self->lowPrioQueue, &timestamp, &queueIndex);
 
     if (asdu != NULL)
-        sendASDU(self, asdu, timestamp, index);
+        sendASDU(self, asdu, timestamp, queueIndex);
 
     MessageQueue_unlock(self->lowPrioQueue);
 
@@ -1738,6 +1741,7 @@ handleTimeouts(MasterConnection self)
         if ((currentTime - self->lastConfirmationTime) >= (uint64_t) (self->slave->conParameters.t2 * 1000)) {
             self->lastConfirmationTime = currentTime;
             self->unconfirmedReceivedIMessages = 0;
+            self->timeoutT2Triggered = false;
             sendSMessage(self);
         }
     }
@@ -1836,6 +1840,8 @@ connectionHandlingThread(void* parameter)
 
                     self->unconfirmedReceivedIMessages = 0;
 
+                    self->timeoutT2Triggered = false;
+
                     sendSMessage(self);
                 }
             }
@@ -1926,7 +1932,7 @@ MasterConnection_create(CS104_Slave slave, Socket socket, MessageQueue lowPrioQu
         self->unconfirmedReceivedIMessages = 0;
         self->lastConfirmationTime = UINT64_MAX;
 
-        self->firstIMessageReceived = false;
+        self->timeoutT2Triggered = false;
 
         self->maxSentASDUs = slave->conParameters.k;
         self->oldestSentASDU = -1;
