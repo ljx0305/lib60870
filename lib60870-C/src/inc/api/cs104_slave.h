@@ -1,7 +1,7 @@
 /*
  *  cs104_slave.h
  *
- *  Copyright 2017 MZ Automation GmbH
+ *  Copyright 2017, 2018 MZ Automation GmbH
  *
  *  This file is part of lib60870-C
  *
@@ -64,6 +64,39 @@ typedef enum {
  */
 typedef bool (*CS104_ConnectionRequestHandler) (void* parameter, const char* ipAddress);
 
+typedef enum {
+    CS104_CON_EVENT_CONNECTION_OPENED = 0,
+    CS104_CON_EVENT_CONNECTION_CLOSED = 1,
+    CS104_CON_EVENT_ACTIVATED = 2,
+    CS104_CON_EVENT_DEACTIVATED = 3
+} CS104_PeerConnectionEvent;
+
+
+/**
+ * \brief Handler that is called when a peer connection is established or closed, or START_DT/STOP_DT is issued
+ *
+ * \param parameter user provided parameter
+ * \param connection the connection object
+ * \param event event type
+ */
+typedef void (*CS104_ConnectionEventHandler) (void* parameter, IMasterConnection connection, CS104_PeerConnectionEvent event);
+
+/**
+ * \brief Callback handler for sent and received messages
+ *
+ * This callback handler provides access to the raw message buffer of received or sent
+ * messages. It can be used for debugging purposes. Usually it is not used nor required
+ * for applications.
+ *
+ * \param parameter user provided parameter
+ * \param connection the connection that sent or received the message
+ * \param msg the message buffer
+ * \param msgSize size of the message
+ * \param sent indicates if the message was sent or received
+ */
+typedef void (*CS104_SlaveRawMessageHandler) (void* parameter, IMasterConnection connection, uint8_t* msg, int msgSize, bool send);
+
+
 /**
  * \brief Create a new instance of a CS104 slave (server)
  *
@@ -125,11 +158,41 @@ CS104_Slave_getOpenConnections(CS104_Slave self);
 void
 CS104_Slave_setMaxOpenConnections(CS104_Slave self, int maxOpenConnections);
 
+/**
+ * \brief Set one of the server modes
+ *
+ * \param self the slave instance
+ * \param serverMode the server mode (see \ref CS104_ServerMode) to use
+ */
 void
 CS104_Slave_setServerMode(CS104_Slave self, CS104_ServerMode serverMode);
 
+/**
+ * \brief Set the connection request handler
+ *
+ * The connection request handler is called whenever a client/master is trying to connect.
+ * This handler can be used to implement access control mechanisms as it allows the user to decide
+ * if the new connection is accepted or not.
+ *
+ * \param self the slave instance
+ * \param handler the callback function to be used
+ * \param parameter user provided context parameter that will be passed to the callback function (or NULL if not required).
+ */
 void
 CS104_Slave_setConnectionRequestHandler(CS104_Slave self, CS104_ConnectionRequestHandler handler, void* parameter);
+
+/**
+ * \brief Set the connection event handler
+ *
+ * The connection request handler is called whenever a connection event happens. A connection event
+ * can be when a client connects or disconnects, or when a START_DT or STOP_DT message is received.
+ *
+ * \param self the slave instance
+ * \param handler the callback function to be used
+ * \param parameter user provided context parameter that will be passed to the callback function (or NULL if not required).
+ */
+void
+CS104_Slave_setConnectionEventHandler(CS104_Slave self, CS104_ConnectionEventHandler handler, void* parameter);
 
 void
 CS104_Slave_setInterrogationHandler(CS104_Slave self, CS101_InterrogationHandler handler, void*  parameter);
@@ -148,6 +211,15 @@ CS104_Slave_setASDUHandler(CS104_Slave self, CS101_ASDUHandler handler, void* pa
 
 void
 CS104_Slave_setClockSyncHandler(CS104_Slave self, CS101_ClockSynchronizationHandler handler, void* parameter);
+
+/**
+ * \brief Set the raw message callback (called when a message is sent or received)
+ *
+ * \param handler user provided callback handler function
+ * \param parameter user provided parameter that is passed to the callback handler
+ */
+void
+CS104_Slave_setRawMessageHandler(CS104_Slave self, CS104_SlaveRawMessageHandler handler, void* parameter);
 
 CS104_APCIParameters
 CS104_Slave_getConnectionParameters(CS104_Slave self);
@@ -187,17 +259,6 @@ CS104_Slave_destroy(CS104_Slave self);
 /**
  * @}
  */
-
-//TODO move to internal
-typedef struct sMasterConnection* MasterConnection;
-
-//TODO move to internal
-void
-MasterConnection_close(MasterConnection self);
-
-//TODO move to internal
-void
-MasterConnection_deactivate(MasterConnection self);
 
 #ifdef __cplusplus
 }

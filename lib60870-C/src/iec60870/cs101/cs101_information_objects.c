@@ -3273,7 +3273,7 @@ EventOfProtectionEquipmentWithCP56Time2a
 EventOfProtectionEquipmentWithCP56Time2a_getFromBuffer(EventOfProtectionEquipmentWithCP56Time2a self, CS101_AppLayerParameters parameters,
         uint8_t* msg, int msgSize, int startIndex, bool isSequence)
 {
-    if ((msgSize - startIndex) < (parameters->sizeOfIOA + 6))
+    if ((msgSize - startIndex) < (parameters->sizeOfIOA + 10))
         return NULL;
 
     if (self == NULL)
@@ -4307,6 +4307,12 @@ DoubleCommandWithCP56Time2a_getFromBuffer(DoubleCommandWithCP56Time2a self, CS10
     return self;
 }
 
+CP56Time2a
+DoubleCommandWithCP56Time2a_getTimestamp(DoubleCommandWithCP56Time2a self)
+{
+    return &(self->timestamp);
+}
+
 /*******************************************
  * StepCommand : InformationObject
  *******************************************/
@@ -4517,6 +4523,12 @@ StepCommandWithCP56Time2a_getFromBuffer(StepCommandWithCP56Time2a self, CS101_Ap
     }
 
     return self;
+}
+
+CP56Time2a
+StepCommandWithCP56Time2a_getTimestamp(StepCommandWithCP56Time2a self)
+{
+    return &(self->timestamp);
 }
 
 
@@ -4742,6 +4754,12 @@ SetpointCommandNormalizedWithCP56Time2a_getFromBuffer(SetpointCommandNormalizedW
     return self;
 }
 
+CP56Time2a
+SetpointCommandNormalizedWithCP56Time2a_getTimestamp(SetpointCommandNormalizedWithCP56Time2a self)
+{
+    return &(self->timestamp);
+}
+
 
 /*************************************************
  * SetpointCommandScaled: InformationObject
@@ -4959,6 +4977,11 @@ SetpointCommandScaledWithCP56Time2a_getFromBuffer(SetpointCommandScaledWithCP56T
     return self;
 }
 
+CP56Time2a
+SetpointCommandScaledWithCP56Time2a_getTimestamp(SetpointCommandScaledWithCP56Time2a self)
+{
+    return &(self->timestamp);
+}
 
 /*************************************************
  * SetpointCommandShort: InformationObject
@@ -5210,6 +5233,11 @@ SetpointCommandShortWithCP56Time2a_getFromBuffer(SetpointCommandShortWithCP56Tim
     return self;
 }
 
+CP56Time2a
+SetpointCommandShortWithCP56Time2a_getTimestamp(SetpointCommandShortWithCP56Time2a self)
+{
+    return &(self->timestamp);
+}
 
 /*************************************************
  * Bitstring32Command : InformationObject

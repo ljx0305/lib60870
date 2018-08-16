@@ -1,5 +1,5 @@
 /*
- *  Copyright 2016 MZ Automation GmbH
+ *  Copyright 2016-2018 MZ Automation GmbH
  *
  *  This file is part of lib60870-C
  *
@@ -114,6 +114,9 @@ struct sCS104_Connection {
 
     CS104_ConnectionHandler connectionHandler;
     void* connectionHandlerParameter;
+
+    IEC60870_RawMessageHandler rawMessageHandler;
+    void* rawMessageHandlerParameter;
 };
 
 
@@ -135,6 +138,9 @@ static uint8_t STARTDT_CON_MSG[] = { 0x68, 0x04, 0x0b, 0x00, 0x00, 0x00 };
 static inline int
 writeToSocket(CS104_Connection self, uint8_t* buf, int size)
 {
+    if (self->rawMessageHandler)
+        self->rawMessageHandler(self->rawMessageHandlerParameter, buf, size, true);
+
 #if (CONFIG_CS104_SUPPORT_TLS == 1)
     if (self->tlsSocket)
         return TLSSocket_write(self->tlsSocket, buf, size);
@@ -196,6 +202,9 @@ createConnection(const char* hostname, int tcpPort)
 
         self->connectionHandler = NULL;
         self->connectionHandlerParameter = NULL;
+
+        self->rawMessageHandler = NULL;
+        self->rawMessageHandlerParameter = NULL;
 
 #if (CONFIG_USE_THREADS == 1)
         self->sentASDUsLock = Semaphore_create(1);
@@ -290,6 +299,7 @@ checkSequenceNumber(CS104_Connection self, int seqNo)
 
     bool seqNoIsValid = false;
     bool counterOverflowDetected = false;
+    int oldestValidSeqNo = -1;
 
     if (self->oldestSentASDU == -1) { /* if k-Buffer is empty */
         if (seqNo == self->sendCount)
@@ -310,9 +320,13 @@ checkSequenceNumber(CS104_Connection self, int seqNo)
             counterOverflowDetected = true;
         }
 
-        int latestValidSeqNo = (self->sentASDUs[self->oldestSentASDU].seqNo - 1) % 32768;
+        /* check if confirmed message was already removed from list */
+        if (self->sentASDUs[self->oldestSentASDU].seqNo == 0)
+            oldestValidSeqNo = 32767;
+        else
+            oldestValidSeqNo = (self->sentASDUs[self->oldestSentASDU].seqNo - 1) % 32768;
 
-        if (latestValidSeqNo == seqNo)
+        if (oldestValidSeqNo == seqNo)
             seqNoIsValid = true;
     }
 
@@ -325,9 +339,21 @@ checkSequenceNumber(CS104_Connection self, int seqNo)
                     if (seqNo < self->sentASDUs [self->oldestSentASDU].seqNo)
                         break;
                 }
-                else {
-                    if (seqNo == ((self->sentASDUs [self->oldestSentASDU].seqNo - 1) % 32768))
-                        break;
+
+                if (seqNo == oldestValidSeqNo)
+                    break;
+
+
+
+                if (self->sentASDUs [self->oldestSentASDU].seqNo == seqNo) {
+                    /* we arrived at the seq# that has been confirmed */
+
+                    if (self->oldestSentASDU == self->newestSentASDU)
+                        self->oldestSentASDU = -1;
+                    else
+                        self->oldestSentASDU = (self->oldestSentASDU + 1) % self->maxSentASDUs;
+
+                    break;
                 }
 
                 self->oldestSentASDU = (self->oldestSentASDU + 1) % self->maxSentASDUs;
@@ -339,8 +365,6 @@ checkSequenceNumber(CS104_Connection self, int seqNo)
                     break;
                 }
 
-                if (self->sentASDUs [self->oldestSentASDU].seqNo == seqNo)
-                    break;
             } while (true);
 
         }
@@ -712,9 +736,12 @@ handleConnection(void* parameter)
 
                     if (bytesRec > 0) {
 
+                        if (self->rawMessageHandler)
+                            self->rawMessageHandler(self->rawMessageHandlerParameter, buffer, bytesRec, false);
+
                         if (checkMessage(self, buffer, bytesRec) == false) {
                             /* close connection on error */
-                            loopRunning= false;
+                            loopRunning = false;
                             self->failure = true;
                         }
                     }
@@ -794,6 +821,13 @@ CS104_Connection_setConnectionHandler(CS104_Connection self, CS104_ConnectionHan
     self->connectionHandlerParameter = parameter;
 }
 
+void
+CS104_Connection_setRawMessageHandler(CS104_Connection self, IEC60870_RawMessageHandler handler, void* parameter)
+{
+    self->rawMessageHandler = handler;
+    self->rawMessageHandlerParameter = parameter;
+}
+
 static void
 encodeIdentificationField(CS104_Connection self, Frame frame, TypeID typeId,
         int vsq, CS101_CauseOfTransmission cot, int ca)
@@ -820,7 +854,7 @@ encodeIOA(CS104_Connection self, Frame frame, int ioa)
     if (self->alParameters.sizeOfIOA > 1)
         T104Frame_setNextByte(frame, (uint8_t) ((ioa / 0x100) & 0xff));
 
-    if (self->alParameters.sizeOfIOA > 1)
+    if (self->alParameters.sizeOfIOA > 2)
         T104Frame_setNextByte(frame, (uint8_t) ((ioa / 0x10000) & 0xff));
 }
 

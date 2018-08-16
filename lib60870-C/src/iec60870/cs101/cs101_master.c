@@ -142,7 +142,7 @@ IPrimaryApplicationLayer_UserData(void* parameter, int slaveAddress, uint8_t* ms
     CS101_ASDU asdu = CS101_ASDU_createFromBuffer(&(self->alParameters), msg + start, length);
 
     if (self->asduReceivedHandler)
-        self->asduReceivedHandler(self->asduReceivedHandlerParameter, 0, asdu);
+        self->asduReceivedHandler(self->asduReceivedHandlerParameter, slaveAddress, asdu);
 
     CS101_ASDU_destroy(asdu);
 
@@ -503,3 +503,19 @@ CS101_Master_setLinkLayerStateChanged(CS101_Master self, IEC60870_LinkLayerState
         LinkLayerPrimaryUnbalanced_setStateChangeHandler(self->unbalancedLinkLayer, handler, parameter);
     }
 }
+
+void
+CS101_Master_setRawMessageHandler(CS101_Master self, IEC60870_RawMessageHandler handler, void* parameter)
+{
+    SerialTransceiverFT12_setRawMessageHandler(self->transceiver, handler, parameter);
+}
+
+void
+CS101_Master_setIdleTimeout(CS101_Master self, int timeoutInMs)
+{
+    if (self->linkLayerMode == IEC60870_LINK_LAYER_BALANCED)
+        LinkLayerBalanced_setIdleTimeout(self->balancedLinkLayer, timeoutInMs);
+
+    /* unbalanced primary layer does not support automatic idle detection */
+}
+

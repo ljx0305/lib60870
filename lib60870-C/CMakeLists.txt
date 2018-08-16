@@ -12,7 +12,7 @@ ENABLE_TESTING()
 
 set(LIB_VERSION_MAJOR "2")
 set(LIB_VERSION_MINOR "0")
-set(LIB_VERSION_PATCH "0")
+set(LIB_VERSION_PATCH "2")
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/third_party/cmake/modules/")
 
@@ -61,14 +61,14 @@ endif(WITH_MBEDTLS)
 set(API_HEADERS 
 	${CMAKE_CURRENT_LIST_DIR}/src/hal/inc/hal_time.h 
 	${CMAKE_CURRENT_LIST_DIR}/src/hal/inc/hal_thread.h
-	${CMAKE_CURRENT_LIST_DIR}/src/hal/inc/hal_filesystem.h 
+	${CMAKE_CURRENT_LIST_DIR}/src/hal/inc/hal_socket.h
 	${CMAKE_CURRENT_LIST_DIR}/src/inc/api/cs101_master.h
 	${CMAKE_CURRENT_LIST_DIR}/src/inc/api/cs101_slave.h
 	${CMAKE_CURRENT_LIST_DIR}/src/inc/api/cs104_slave.h
 	${CMAKE_CURRENT_LIST_DIR}/src/inc/api/iec60870_master.h
 	${CMAKE_CURRENT_LIST_DIR}/src/inc/api/iec60870_slave.h
 	${CMAKE_CURRENT_LIST_DIR}/src/inc/api/iec60870_common.h
-	${CMAKE_CURRENT_LIST_DIR}/src/inc/api/information_objects
+	${CMAKE_CURRENT_LIST_DIR}/src/inc/api/cs101_information_objects.h
 	${CMAKE_CURRENT_LIST_DIR}/src/inc/api/cs104_connection.h
 	${CMAKE_CURRENT_LIST_DIR}/src/inc/api/link_layer_parameters.h
 	${CMAKE_CURRENT_LIST_DIR}/src/tls/tls_api.h

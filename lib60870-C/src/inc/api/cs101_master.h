@@ -293,6 +293,26 @@ void
 CS101_Master_setLinkLayerStateChanged(CS101_Master self, IEC60870_LinkLayerStateChangedHandler handler, void* parameter);
 
 /**
+ * \brief Set the raw message callback (called when a message is sent or received)
+ *
+ * \param handler user provided callback handler function
+ * \param parameter user provided parameter that is passed to the callback handler
+ */
+void
+CS101_Master_setRawMessageHandler(CS101_Master self, IEC60870_RawMessageHandler handler, void* parameter);
+
+/**
+ * \brief Set the idle timeout (only for balanced mode)
+ *
+ * Time with no activity after which the connection is considered
+ * in idle (LL_STATE_IDLE) state.
+ *
+ * \param timeoutInMs the timeout value in milliseconds
+ */
+void
+CS101_Master_setIdleTimeout(CS101_Master self, int timeoutInMs);
+
+/**
  * @}
  */
 

@@ -28,6 +28,23 @@ printCP56Time2a(CP56Time2a time)
                              CP56Time2a_getYear(time) + 2000);
 }
 
+/* Callback handler to log sent or received messages (optional) */
+static void
+rawMessageHandler(void* parameter, IMasterConnection conneciton, uint8_t* msg, int msgSize, bool sent)
+{
+    if (sent)
+        printf("SEND: ");
+    else
+        printf("RCVD: ");
+
+    int i;
+    for (i = 0; i < msgSize; i++) {
+        printf("%02x ", msg[i]);
+    }
+
+    printf("\n");
+}
+
 static bool
 clockSyncHandler (void* parameter, IMasterConnection connection, CS101_ASDU asdu, CP56Time2a newTime)
 {
@@ -147,7 +164,7 @@ asduHandler(void* parameter, IMasterConnection connection, CS101_ASDU asdu)
 static bool
 connectionRequestHandler(void* parameter, const char* ipAddress)
 {
-    printf("New connection from %s\n", ipAddress);
+    printf("New connection request from %s\n", ipAddress);
 
 #if 0
     if (strcmp(ipAddress, "127.0.0.1") == 0) {
@@ -163,6 +180,23 @@ connectionRequestHandler(void* parameter, const char* ipAddress)
 #endif
 }
 
+static void
+connectionEventHandler(void* parameter, IMasterConnection con, CS104_PeerConnectionEvent event)
+{
+    if (event == CS104_CON_EVENT_CONNECTION_OPENED) {
+        printf("Connection opened (%p)\n", con);
+    }
+    else if (event == CS104_CON_EVENT_CONNECTION_CLOSED) {
+        printf("Connection closed (%p)\n", con);
+    }
+    else if (event == CS104_CON_EVENT_ACTIVATED) {
+        printf("Connection activated (%p)\n", con);
+    }
+    else if (event == CS104_CON_EVENT_DEACTIVATED) {
+        printf("Connection deactivated (%p)\n", con);
+    }
+}
+
 int
 main(int argc, char** argv)
 {
@@ -175,6 +209,9 @@ main(int argc, char** argv)
 
     CS104_Slave_setLocalAddress(slave, "0.0.0.0");
 
+    /* Set mode to a single redundancy group
+     * NOTE: library has to be compiled with CONFIG_CS104_SUPPORT_SERVER_MODE_SINGLE_REDUNDANCY_GROUP enabled (=1)
+     */
     CS104_Slave_setServerMode(slave, CS104_MODE_SINGLE_REDUNDANCY_GROUP);
 
     /* get the connection parameters - we need them to create correct ASDUs */
@@ -189,7 +226,14 @@ main(int argc, char** argv)
     /* set handler for other message types */
     CS104_Slave_setASDUHandler(slave, asduHandler, NULL);
 
+    /* set handler to handle connection requests (optional) */
     CS104_Slave_setConnectionRequestHandler(slave, connectionRequestHandler, NULL);
+
+    /* set handler to track connection events (optional) */
+    CS104_Slave_setConnectionEventHandler(slave, connectionEventHandler, NULL);
+
+    /* uncomment to log messages */
+    //CS104_Slave_setRawMessageHandler(slave, rawMessageHandler, NULL);
 
     CS104_Slave_start(slave);
 
