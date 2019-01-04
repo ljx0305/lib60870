@@ -165,7 +165,8 @@ static struct sIPrimaryApplicationLayer cs101UnbalancedAppLayerInterface = {
  ********************************************/
 
 CS101_Master
-CS101_Master_create(SerialPort serialPort, LinkLayerParameters llParameters, CS101_AppLayerParameters alParameters, IEC60870_LinkLayerMode linkLayerMode)
+CS101_Master_createEx(SerialPort serialPort, LinkLayerParameters llParameters, CS101_AppLayerParameters alParameters, IEC60870_LinkLayerMode linkLayerMode,
+        int queueSize)
 {
     CS101_Master self = (CS101_Master) GLOBAL_MALLOC(sizeof(struct sCS101_Master));
 
@@ -197,7 +198,7 @@ CS101_Master_create(SerialPort serialPort, LinkLayerParameters llParameters, CS1
                     &(self->linkLayerParameters), &cs101UnbalancedAppLayerInterface, self);
         }
         else {
-            CS101_Queue_initialize(&(self->userDataQueue), CS101_MAX_QUEUE_SIZE);
+            CS101_Queue_initialize(&(self->userDataQueue), queueSize);
 
             self->unbalancedLinkLayer = NULL;
 
@@ -218,6 +219,12 @@ CS101_Master_create(SerialPort serialPort, LinkLayerParameters llParameters, CS1
     }
 
     return self;
+}
+
+CS101_Master
+CS101_Master_create(SerialPort serialPort, LinkLayerParameters llParameters, CS101_AppLayerParameters alParameters, IEC60870_LinkLayerMode linkLayerMode)
+{
+    return CS101_Master_createEx(serialPort, llParameters, alParameters, linkLayerMode, CS101_MAX_QUEUE_SIZE);
 }
 
 void
@@ -349,7 +356,7 @@ CS101_Master_sendLinkLayerTestFunction(CS101_Master self)
 void
 CS101_Master_sendInterrogationCommand(CS101_Master self, CS101_CauseOfTransmission cot, int ca, QualifierOfInterrogation qoi)
 {
-    struct sCS101_StaticASDU _asdu;
+    sCS101_StaticASDU _asdu;
 
     CS101_ASDU asdu = CS101_ASDU_initializeStatic(&_asdu, &(self->alParameters), false, cot, self->alParameters.originatorAddress, ca, false, false);
 
@@ -365,7 +372,7 @@ CS101_Master_sendInterrogationCommand(CS101_Master self, CS101_CauseOfTransmissi
 void
 CS101_Master_sendCounterInterrogationCommand(CS101_Master self, CS101_CauseOfTransmission cot, int ca, uint8_t qcc)
 {
-    struct sCS101_StaticASDU _asdu;
+    sCS101_StaticASDU _asdu;
 
     CS101_ASDU asdu = CS101_ASDU_initializeStatic(&_asdu, &(self->alParameters), false, cot, self->alParameters.originatorAddress, ca, false, false);
 
@@ -381,7 +388,7 @@ CS101_Master_sendCounterInterrogationCommand(CS101_Master self, CS101_CauseOfTra
 void
 CS101_Master_sendReadCommand(CS101_Master self, int ca, int ioa)
 {
-    struct sCS101_StaticASDU _asdu;
+    sCS101_StaticASDU _asdu;
 
     CS101_ASDU asdu = CS101_ASDU_initializeStatic(&_asdu, &(self->alParameters), false, CS101_COT_REQUEST, self->alParameters.originatorAddress, ca, false, false);
 
@@ -397,7 +404,7 @@ CS101_Master_sendReadCommand(CS101_Master self, int ca, int ioa)
 void
 CS101_Master_sendClockSyncCommand(CS101_Master self, int ca, CP56Time2a time)
 {
-    struct sCS101_StaticASDU _asdu;
+    sCS101_StaticASDU _asdu;
 
     CS101_ASDU asdu = CS101_ASDU_initializeStatic(&_asdu, &(self->alParameters), false, CS101_COT_ACTIVATION, self->alParameters.originatorAddress, ca, false, false);
 
@@ -413,7 +420,7 @@ CS101_Master_sendClockSyncCommand(CS101_Master self, int ca, CP56Time2a time)
 void
 CS101_Master_sendTestCommand(CS101_Master self, int ca)
 {
-    struct sCS101_StaticASDU _asdu;
+    sCS101_StaticASDU _asdu;
 
     CS101_ASDU asdu = CS101_ASDU_initializeStatic(&_asdu, &(self->alParameters), false, CS101_COT_ACTIVATION, self->alParameters.originatorAddress, ca, false, false);
 
@@ -429,7 +436,7 @@ CS101_Master_sendTestCommand(CS101_Master self, int ca)
 void
 CS101_Master_sendProcessCommand(CS101_Master self, CS101_CauseOfTransmission cot, int ca, InformationObject command)
 {
-    struct sCS101_StaticASDU _asdu;
+    sCS101_StaticASDU _asdu;
 
     CS101_ASDU asdu = CS101_ASDU_initializeStatic(&_asdu, &(self->alParameters), false, cot, self->alParameters.originatorAddress, ca, false, false);
 

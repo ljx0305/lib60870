@@ -80,8 +80,12 @@ struct sCS104_Connection {
     int maxSentASDUs;    /* maximum number of ASDU to be sent without confirmation - parameter k */
     int oldestSentASDU;  /* index of oldest entry in k-buffer */
     int newestSentASDU;  /* index of newest entry in k-buffer */
-#if (CONFIG_USE_THREADS == 1)
+
+#if (CONFIG_USE_SEMAPHORES == 1)
     Semaphore sentASDUsLock;
+#endif
+
+#if (CONFIG_USE_THREADS == 1)
     Thread connectionHandlingThread;
 #endif
 
@@ -135,7 +139,7 @@ static uint8_t STOPDT_ACT_MSG[] = { 0x68, 0x04, 0x13, 0x00, 0x00, 0x00 };
 static uint8_t STARTDT_CON_MSG[] = { 0x68, 0x04, 0x0b, 0x00, 0x00, 0x00 };
 #define STARTDT_CON_MSG_SIZE 6
 
-static inline int
+static int
 writeToSocket(CS104_Connection self, uint8_t* buf, int size)
 {
     if (self->rawMessageHandler)
@@ -206,8 +210,11 @@ createConnection(const char* hostname, int tcpPort)
         self->rawMessageHandler = NULL;
         self->rawMessageHandlerParameter = NULL;
 
-#if (CONFIG_USE_THREADS == 1)
+#if (CONFIG_USE_SEMAPHORES == 1)
         self->sentASDUsLock = Semaphore_create(1);
+#endif
+
+#if (CONFIG_USE_THREADS == 1)
         self->connectionHandlingThread = NULL;
 #endif
 
@@ -291,7 +298,7 @@ resetConnection(CS104_Connection self)
 static bool
 checkSequenceNumber(CS104_Connection self, int seqNo)
 {
-#if (CONFIG_USE_THREADS == 1)
+#if (CONFIG_USE_SEMAPHORES == 1)
     Semaphore_wait(self->sentASDUsLock);
 #endif
 
@@ -370,7 +377,7 @@ checkSequenceNumber(CS104_Connection self, int seqNo)
         }
     }
 
-#if (CONFIG_USE_THREADS == 1)
+#if (CONFIG_USE_SEMAPHORES == 1)
     Semaphore_post(self->sentASDUsLock);
 #endif
 
@@ -413,7 +420,7 @@ CS104_Connection_destroy(CS104_Connection self)
     if (self->sentASDUs != NULL)
         GLOBAL_FREEMEM(self->sentASDUs);
 
-#if (CONFIG_USE_THREADS == 1)
+#if (CONFIG_USE_SEMAPHORES == 1)
     Semaphore_destroy(self->sentASDUsLock);
 #endif
 
@@ -453,7 +460,7 @@ CS104_Connection_getAPCIParameters(CS104_Connection self)
 }
 
 #if (CONFIG_CS104_SUPPORT_TLS == 1)
-static inline int
+static int
 receiveMessageTlsSocket(TLSSocket socket, uint8_t* buffer)
 {
     int readFirst = TLSSocket_read(socket, buffer, 1);
@@ -477,7 +484,7 @@ receiveMessageTlsSocket(TLSSocket socket, uint8_t* buffer)
 }
 #endif /*  (CONFIG_CS104_SUPPORT_TLS == 1) */
 
-static inline int
+static int
 receiveMessageSocket(Socket socket, uint8_t* buffer)
 {
     int readFirst = Socket_read(socket, buffer, 1);
@@ -515,12 +522,15 @@ receiveMessage(CS104_Connection self, uint8_t* buffer)
 
 
 static bool
-checkConfirmTimeout(CS104_Connection self, long currentTime)
+checkConfirmTimeout(CS104_Connection self, uint64_t currentTime)
 {
-    if ((currentTime - self->lastConfirmationTime) >= (uint32_t) (self->parameters.t2 * 1000))
-        return true;
-    else
-        return false;
+    if (currentTime > self->lastConfirmationTime) {
+        if ((currentTime - self->lastConfirmationTime) >= (uint32_t) (self->parameters.t2 * 1000)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 static bool
@@ -662,16 +672,18 @@ handleTimeouts(CS104_Connection self)
     }
 
     /* check if counterpart confirmed I messages */
-#if (CONFIG_USE_THREADS == 1)
+#if (CONFIG_USE_SEMAPHORES == 1)
     Semaphore_wait(self->sentASDUsLock);
 #endif
     if (self->oldestSentASDU != -1) {
-        if ((currentTime - self->sentASDUs[self->oldestSentASDU].sentTime) >= (uint64_t) (self->parameters.t1 * 1000)) {
-            DEBUG_PRINT("I message timeout\n");
-            retVal = false;
+        if (currentTime > self->sentASDUs[self->oldestSentASDU].sentTime) {
+            if ((currentTime - self->sentASDUs[self->oldestSentASDU].sentTime) >= (uint64_t) (self->parameters.t1 * 1000)) {
+                DEBUG_PRINT("I message timeout\n");
+                retVal = false;
+            }
         }
     }
-#if (CONFIG_USE_THREADS == 1)
+#if (CONFIG_USE_SEMAPHORES == 1)
     Semaphore_post(self->sentASDUsLock);
 #endif
 
@@ -681,6 +693,7 @@ exit_function:
     return retVal;
 }
 
+#if (CONFIG_USE_THREADS == 1)
 static void*
 handleConnection(void* parameter)
 {
@@ -696,7 +709,7 @@ handleConnection(void* parameter)
 
 #if (CONFIG_CS104_SUPPORT_TLS == 1)
         if (self->tlsConfig != NULL) {
-            self->tlsSocket = TLSSocket_create(self->socket, self->tlsConfig);
+            self->tlsSocket = TLSSocket_create(self->socket, self->tlsConfig, false);
 
             if (self->tlsSocket)
                 self->running = true;
@@ -786,19 +799,30 @@ handleConnection(void* parameter)
 
     return NULL;
 }
+#endif /* (CONFIG_USE_THREADS == 1) */
 
 void
 CS104_Connection_connectAsync(CS104_Connection self)
 {
+    self->running = false;
+    self->failure = false;
+    self->close = false;
+
+#if (CONFIG_USE_THREADS == 1)
     self->connectionHandlingThread = Thread_create(handleConnection, (void*) self, false);
 
     if (self->connectionHandlingThread)
         Thread_start(self->connectionHandlingThread);
+#endif
 }
 
 bool
 CS104_Connection_connect(CS104_Connection self)
 {
+    self->running = false;
+    self->failure = false;
+    self->close = false;
+
     CS104_Connection_connectAsync(self);
 
     while ((self->running == false) && (self->failure == false))
@@ -873,7 +897,7 @@ CS104_Connection_sendStopDT(CS104_Connection self)
 static void
 sendIMessageAndUpdateSentASDUs(CS104_Connection self, Frame frame)
 {
-#if (CONFIG_USE_THREADS == 1)
+#if (CONFIG_USE_SEMAPHORES == 1)
     Semaphore_wait(self->sentASDUsLock);
 #endif
 
@@ -892,7 +916,7 @@ sendIMessageAndUpdateSentASDUs(CS104_Connection self, Frame frame)
 
     self->newestSentASDU = currentIndex;
 
-#if (CONFIG_USE_THREADS == 1)
+#if (CONFIG_USE_SEMAPHORES == 1)
     Semaphore_post(self->sentASDUsLock);
 #endif
 }
