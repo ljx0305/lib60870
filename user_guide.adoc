@@ -679,6 +679,10 @@ CS104_Slave slave = CS104_Slave_createSecure(100, 100, tlsConfig);
 
 The debug output to the console can be enabled by setting _CONFIG_DEBUG_OUTPUT_ to 1. This will enable the debug output by default. The debug output can be disabled my using the function *Lib60870_enableDebugOutput*. The default implementation of the debug output function will print to the console (using printf). If you need to redirect the output the most easy way would be to change the implementation of the debug output *lib60870_debug_print* function in _lib60870_common.c_.
 
+=== Memory management
+
+
+
 === Big endian platforms
 
 The library contains a C header file to determine the platform byte order (_src/inc/internal/platform_endian.h_) when using the GCC compiler. This depends on defines that are provided by the C compiler. On some older big endian platforms like PowerPC or Coldfire depending on the compiler this may fail. You may have to define
@@ -697,6 +701,8 @@ on the GCC command line when the platform byte order is big endian.
 
 Some configuration options are fixed at compile time of the library code. These options can be found in the file *lib60870_config.h*.
 
+Compile time options include the support for specific CS 104 redundancy modes, support for threads and semaphores (required when the library uses threads), maximum number of TCP connections for CS 104 slave, and others.
+
 == Reference information
 
 === Supported message types
@@ -705,7 +711,7 @@ The library supports the following ASDU (application service data unit) types.
 
 .IEC 60870-5-101/104 message types
 [width="90%",cols="n,10,1,1",frame="topbot",options="header"]
-|==========================
+|===
 | Message type | Description | C | C#
 | M_SP_NA_1(1) | Single point information (BOOLEAN)  | + | +
 | M_SP_TA_1(2) | Single point information (BOOLEAN) with CP24Time2a | + | +
@@ -775,7 +781,7 @@ The library supports the following ASDU (application service data unit) types.
 | F_AF_NA_1(124) | ACK file/section | + | +
 | F_SG_NA_1(125) | File segment | + | +
 | F_DR_TA_1(126) | File directory | + | +
-|==========================
+|===
 
 === CS 104 specific parameters
 
@@ -783,7 +789,7 @@ The following parameters are stored in *CS104_ConnectionParameters* objects.
 
 .IEC 60870-5-104 parameters
 [width="90%",cols="n,10",frame="topbot",options="header"]
-|==========================
+|===
 |Parameter        |Description
 |k       |Number of unconfirmed APDUs in I format. Sender will stop transmission after k unconfirmed I messages.
 |w       |Number of unconfirmed APDUs in I format. Receiver will confirm latest after w messages
@@ -791,4 +797,4 @@ The following parameters are stored in *CS104_ConnectionParameters* objects.
 |t1      |Timeout for transmitted APDUs in I/U format (in s) when timeout elapsed without confirmation the connection will be closed. This is used by the sender to determine if the receiver has failed to confirm a message.
 |t2      |Timeout to confirm messages (in s). This timeout is used by the receiver to determine the time when the message confirmation has to be sent.
 |t3      |time until test telegrams will be sent in case of an idle connection
-|==========================
+|===

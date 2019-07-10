@@ -63,26 +63,43 @@ extern "C" {
 typedef struct sIMasterConnection* IMasterConnection;
 
 struct sIMasterConnection {
-    void (*sendASDU) (IMasterConnection self, CS101_ASDU asdu);
-    void (*sendACT_CON) (IMasterConnection self, CS101_ASDU asdu, bool negative);
-    void (*sendACT_TERM) (IMasterConnection self, CS101_ASDU asdu);
+    bool (*isReady) (IMasterConnection self);
+    bool (*sendASDU) (IMasterConnection self, CS101_ASDU asdu);
+    bool (*sendACT_CON) (IMasterConnection self, CS101_ASDU asdu, bool negative);
+    bool (*sendACT_TERM) (IMasterConnection self, CS101_ASDU asdu);
     void (*close) (IMasterConnection self);
     int (*getPeerAddress) (IMasterConnection self, char* addrBuf, int addrBufSize);
     CS101_AppLayerParameters (*getApplicationLayerParameters) (IMasterConnection self);
     void* object;
 };
 
+/*
+ * \brief Check if the connection is ready to send an ASDU.
+ *
+ * \deprecated Use one of the send functions (e.g. \ref IMasterConnection_sendASDU) and evaluate
+ * the return value.
+ *
+ * NOTE: The functions returns true when the connection is activated, the ASDU can be immediately sent,
+ * or the queue has enough space to store another ASDU.
+ *
+ * \param self the connection object (this is usually received as a parameter of a callback function)
+ *
+ * \returns true if the connection is ready to send an ASDU, false otherwise
+ */
+bool
+IMasterConnection_isReady(IMasterConnection self);
+
 /**
  * \brief Send an ASDU to the client/master
  *
- * The ASDU will be released by this function after the message is sent.
- * You should not call the ASDU_destroy function for the given ASDU after
- * calling this function!
+ * NOTE: ASDU instance has to be released by the caller!
  *
  * \param self the connection object (this is usually received as a parameter of a callback function)
  * \param asdu the ASDU to send to the client/master
+ *
+ * \return true when the ASDU has been sent or queued for transmission, false otherwise
  */
-void
+bool
 IMasterConnection_sendASDU(IMasterConnection self, CS101_ASDU asdu);
 
 /**
@@ -92,8 +109,10 @@ IMasterConnection_sendASDU(IMasterConnection self, CS101_ASDU asdu);
  *
  * \param asdu the ASDU to send to the client/master
  * \param negative value of the negative flag
+ *
+ * \return true when the ASDU has been sent or queued for transmission, false otherwise
  */
-void
+bool
 IMasterConnection_sendACT_CON(IMasterConnection self, CS101_ASDU asdu, bool negative);
 
 /**
@@ -102,8 +121,10 @@ IMasterConnection_sendACT_CON(IMasterConnection self, CS101_ASDU asdu, bool nega
  * ACT_TERM is used to indicate that the command execution is complete.
  *
  * \param asdu the ASDU to send to the client/master
+ *
+ * \return true when the ASDU has been sent or queued for transmission, false otherwise
  */
-void
+bool
 IMasterConnection_sendACT_TERM(IMasterConnection self, CS101_ASDU asdu);
 
 /**

@@ -1,6 +1,9 @@
 #include "unity.h"
 #include "iec60870_common.h"
+#include "cs104_slave.h"
+#include "cs104_connection.h"
 #include "hal_time.h"
+#include "hal_thread.h"
 #include "buffer_frame.h"
 #include <string.h>
 #include <stdlib.h>
@@ -17,12 +20,6 @@ static struct sCS101_AppLayerParameters defaultAppLayerParameters = {
     /* .sizeOfIOA = */ 3,
     /* .maxSizeOfASDU = */ 249
 };
-
-typedef enum
-{
-    IP_ADDRESS_TYPE_IPV4,
-    IP_ADDRESS_TYPE_IPV6
-} eCS104_IPAddressType;
 
 typedef struct sCS104_IPAddress* CS104_IPAddress;
 
@@ -261,6 +258,240 @@ test_EventOfProtectionEquipmentWithTime(void)
 }
 
 
+
+struct test_CS104SlaveConnectionIsRedundancyGroup_Info
+{
+    bool running;
+    CS104_Slave slave;
+};
+
+static void*
+test_CS104SlaveConnectionIsRedundancyGroup_enqueueThreadFunction(void* parameter)
+{
+    struct test_CS104SlaveConnectionIsRedundancyGroup_Info* info =  (struct test_CS104SlaveConnectionIsRedundancyGroup_Info*) parameter;
+
+    CS101_AppLayerParameters alParams = CS104_Slave_getAppLayerParameters(info->slave);
+
+    int16_t scaledValue = 0;
+
+    while (info->running) {
+
+        CS101_ASDU newAsdu = CS101_ASDU_create(alParams, false, CS101_COT_PERIODIC, 0, 1, false, false);
+
+          InformationObject io = (InformationObject) MeasuredValueScaled_create(NULL, 110, scaledValue, IEC60870_QUALITY_GOOD);
+
+          scaledValue++;
+
+          CS101_ASDU_addInformationObject(newAsdu, io);
+
+          InformationObject_destroy(io);
+
+          CS104_Slave_enqueueASDU(info->slave, newAsdu);
+
+          CS101_ASDU_destroy(newAsdu);
+    }
+
+    return NULL;
+}
+
+void
+test_CS104SlaveConnectionIsRedundancyGroup()
+{
+    CS104_Slave slave = CS104_Slave_create(100, 100);
+
+    CS104_Slave_setServerMode(slave, CS104_MODE_CONNECTION_IS_REDUNDANCY_GROUP);
+    CS104_Slave_setLocalPort(slave, 20004);
+
+    CS104_Slave_start(slave);
+
+    struct test_CS104SlaveConnectionIsRedundancyGroup_Info info;
+    info.running = true;
+    info.slave = slave;
+
+    Thread enqueueThread = Thread_create(test_CS104SlaveConnectionIsRedundancyGroup_enqueueThreadFunction, &info, false);
+    Thread_start(enqueueThread);
+
+    CS104_Connection con = CS104_Connection_create("127.0.0.1", 20004);
+
+    int i;
+
+    for (i = 0; i < 50; i++) {
+        bool result = CS104_Connection_connect(con);
+        TEST_ASSERT_TRUE(result);
+
+        CS104_Connection_sendStartDT(con);
+
+        Thread_sleep(10);
+
+        CS104_Connection_close(con);
+    }
+
+    info.running = false;
+    Thread_destroy(enqueueThread);
+
+    CS104_Connection_destroy(con);
+
+    CS104_Slave_destroy(slave);
+}
+
+void
+test_CS104SlaveSingleRedundancyGroup()
+{
+    CS104_Slave slave = CS104_Slave_create(100, 100);
+
+    CS104_Slave_setServerMode(slave, CS104_MODE_SINGLE_REDUNDANCY_GROUP);
+    CS104_Slave_setLocalPort(slave, 20004);
+
+    CS104_Slave_start(slave);
+
+    struct test_CS104SlaveConnectionIsRedundancyGroup_Info info;
+    info.running = true;
+    info.slave = slave;
+
+    Thread enqueueThread = Thread_create(test_CS104SlaveConnectionIsRedundancyGroup_enqueueThreadFunction, &info, false);
+    Thread_start(enqueueThread);
+
+    CS104_Connection con = CS104_Connection_create("127.0.0.1", 20004);
+
+    int i;
+
+    for (i = 0; i < 50; i++) {
+        bool result = CS104_Connection_connect(con);
+        TEST_ASSERT_TRUE(result);
+
+        CS104_Connection_sendStartDT(con);
+
+        Thread_sleep(10);
+
+        CS104_Connection_close(con);
+    }
+
+    info.running = false;
+    Thread_destroy(enqueueThread);
+
+    CS104_Connection_destroy(con);
+
+    CS104_Slave_destroy(slave);
+}
+
+struct stest_CS104SlaveEventQueue1 {
+    int asduHandlerCalled;
+    int spontCount;
+    int16_t lastScaledValue;
+};
+
+static bool
+test_CS104SlaveEventQueue1_asduReceivedHandler (void* parameter, int address, CS101_ASDU asdu)
+{
+    struct stest_CS104SlaveEventQueue1* info = (struct stest_CS104SlaveEventQueue1*) parameter;
+
+    info->asduHandlerCalled++;
+
+    if (CS101_ASDU_getCOT(asdu) == CS101_COT_SPONTANEOUS) {
+        info->spontCount++;
+
+
+        if (CS101_ASDU_getTypeID(asdu) == M_ME_NB_1) {
+            static uint8_t ioBuf[250];
+
+            MeasuredValueScaled mv = (MeasuredValueScaled) CS101_ASDU_getElementEx(asdu, (InformationObject) ioBuf, 0);
+
+            info->lastScaledValue = MeasuredValueScaled_getValue(mv);
+        }
+    }
+
+    return true;
+}
+
+void
+test_CS104SlaveEventQueue1()
+{
+    CS104_Slave slave = CS104_Slave_create(10, 10);
+
+    CS104_Slave_setServerMode(slave, CS104_MODE_SINGLE_REDUNDANCY_GROUP);
+    CS104_Slave_setLocalPort(slave, 20004);
+
+    CS104_Slave_start(slave);
+
+    CS101_AppLayerParameters alParams = CS104_Slave_getAppLayerParameters(slave);
+
+    struct stest_CS104SlaveEventQueue1 info;
+    info.asduHandlerCalled = 0;
+    info.spontCount = 0;
+    info.lastScaledValue = 0;
+
+    int16_t scaledValue = 0;
+
+    int i;
+
+    for (int i = 0; i < 15; i++) {
+        CS101_ASDU newAsdu = CS101_ASDU_create(alParams, false, CS101_COT_SPONTANEOUS, 0, 1, false, false);
+
+        InformationObject io = (InformationObject) MeasuredValueScaled_create(NULL, 110, scaledValue, IEC60870_QUALITY_GOOD);
+
+        scaledValue++;
+
+        CS101_ASDU_addInformationObject(newAsdu, io);
+
+        InformationObject_destroy(io);
+
+        CS104_Slave_enqueueASDU(slave, newAsdu);
+
+        CS101_ASDU_destroy(newAsdu);
+    }
+
+    CS104_Connection con = CS104_Connection_create("127.0.0.1", 20004);
+
+    CS104_Connection_setASDUReceivedHandler(con, test_CS104SlaveEventQueue1_asduReceivedHandler, &info);
+
+    bool result = CS104_Connection_connect(con);
+    TEST_ASSERT_TRUE(result);
+
+    CS104_Connection_sendStartDT(con);
+
+    Thread_sleep(500);
+
+    CS104_Connection_close(con);
+
+    TEST_ASSERT_EQUAL_INT(14, info.lastScaledValue);
+
+    result = CS104_Connection_connect(con);
+    TEST_ASSERT_TRUE(result);
+
+    CS104_Connection_sendStartDT(con);
+
+    for (int i = 0; i < 15; i++) {
+        CS101_ASDU newAsdu = CS101_ASDU_create(alParams, false, CS101_COT_SPONTANEOUS, 0, 1, false, false);
+
+        InformationObject io = (InformationObject) MeasuredValueScaled_create(NULL, 110, scaledValue, IEC60870_QUALITY_GOOD);
+
+        scaledValue++;
+
+        CS101_ASDU_addInformationObject(newAsdu, io);
+
+        InformationObject_destroy(io);
+
+        CS104_Slave_enqueueASDU(slave, newAsdu);
+
+        CS101_ASDU_destroy(newAsdu);
+
+        Thread_sleep(10);
+    }
+
+    Thread_sleep(500);
+
+    CS104_Connection_close(con);
+
+    TEST_ASSERT_EQUAL_INT(29, info.asduHandlerCalled);
+    TEST_ASSERT_EQUAL_INT(29, info.spontCount);
+    TEST_ASSERT_EQUAL_INT(29, info.lastScaledValue);
+
+    CS104_Connection_destroy(con);
+
+    CS104_Slave_destroy(slave);
+}
+
+
 void
 test_IpAddressHandling(void)
 {
@@ -305,5 +536,11 @@ main(int argc, char** argv)
     RUN_TEST(test_SingleEventType);
     RUN_TEST(test_EventOfProtectionEquipmentWithTime);
     RUN_TEST(test_IpAddressHandling);
+
+    RUN_TEST(test_CS104SlaveConnectionIsRedundancyGroup);
+    RUN_TEST(test_CS104SlaveSingleRedundancyGroup);
+
+    RUN_TEST(test_CS104SlaveEventQueue1);
+
     return UNITY_END();
 }
